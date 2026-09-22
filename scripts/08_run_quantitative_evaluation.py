@@ -1,3 +1,4 @@
+
 import os, sys, json, time
 from dotenv import load_dotenv
 
@@ -27,10 +28,12 @@ def main():
     # ----- Experiment setting -----
     TOP_K = 5
     MAX_WORKERS = 10
-    QUESTION_CONCURRENCY = 2
+    QUESTION_CONCURRENCY = 1
     USE_CACHE = True
     TARGET_USERS = {"user-1", "user-2", "user-3", "user-4", "user-5", "user-6", "user-7", "baseline-admin"}
-    SAMPLE_SIZE = 1000
+    # Paper-scale default is 1000; set EVAL_SAMPLE_SIZE=100 for faster dry runs.
+    SAMPLE_SIZE = int(os.getenv("EVAL_SAMPLE_SIZE", "1000"))
+    SEED = int(os.getenv("EVAL_SEED", "42"))
     
     # ----- Managers / Stores -----
     user_manager = CredentialManager(base_path=ARTIFACTS, file_name="test_credential.txt")
@@ -43,7 +46,7 @@ def main():
     # ----- Processor + PermissionRetriever -----
     pr = PermissionRetriever(ms, PermissionRetrieverConfig(max_workers=1, use_cache=USE_CACHE))
     qp = QuestionProcessor(QUESTION_FILE, METADATA_FILE, vs, user_manager, permission_retriever=pr)
-    qp.sample_questions(sample_size=SAMPLE_SIZE, seed=42)
+    qp.sample_questions(sample_size=SAMPLE_SIZE, seed=SEED)
 
     summary_rows = []
     details_all = []
@@ -158,7 +161,7 @@ def main():
     {
         'user': r.get('user'),
         'PermCov': round(r.get('PermissionCoverage_pct', 0.0), 2),
-        'Match': 'PASS' if r.get('AccessMatch') else 'FAIL',
+        'Match': r.get('AccessMatch', 'FAIL'),
         'EM': r.get('em'),
         'F1': r.get('f1'),
         'EM@Admin': r.get('em_admin')

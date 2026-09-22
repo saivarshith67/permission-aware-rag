@@ -1,6 +1,11 @@
 # hotpot_evaluate_with_em_admin.py
 # Thin wrapper: reuse primitives from hotpot_evaluate_v1.py and compute
 # EM, F1, and EM@Admin. Returns a dict without printing.
+#
+# IMPORTANT: When predictions cover a sampled subset (as in script 08),
+# EM/F1 are normalized over the predicted question IDs that exist in gold,
+# not the full HotpotQA gold list. Dividing by the full gold set (~7405)
+# artificially collapses sampled scores toward ~0.
 
 from typing import Dict, Any, Optional, Set
 import json
@@ -68,35 +73,33 @@ def eval(prediction_file: str,
     user_ans = _answer_dict(pred_obj)
 
     gold_answers, gold_list = _load_gold_answers(gold_file)
-    N = len(gold_list)
 
-    # Aggregate EM and F1 exactly like the original logic:
-    # - Missing answers contribute 0 (denominator is N)
+    # Evaluate only questions present in the prediction file (sampled runs).
+    # Fall back to full gold size only when predictions cover the whole set.
+    eval_qids = [qid for qid in user_ans.keys() if qid in gold_answers]
+    N = len(eval_qids) if eval_qids else len(gold_list)
+
     em_sum = 0.0
     f1_sum = 0.0
-    for dp in gold_list:
-        qid = dp["_id"]
-        gold_a = dp["answer"]
-        if qid in user_ans:
-            # original uses exact_match_score and f1_score on normalized strings
-            em_bool = exact_match_score(user_ans[qid], gold_a)
-            f1_val, _, _ = f1_score(user_ans[qid], gold_a)
-            em_sum += float(em_bool)
-            f1_sum += f1_val
-        else:
-            # missing -> add 0.0 (keeps behavior consistent with original)
-            pass
+    for qid in eval_qids:
+        gold_a = gold_answers[qid]
+        em_bool = exact_match_score(user_ans[qid], gold_a)
+        f1_val, _, _ = f1_score(user_ans[qid], gold_a)
+        em_sum += float(em_bool)
+        f1_sum += f1_val
 
     em = em_sum / float(N) if N > 0 else 0.0
     f1 = f1_sum / float(N) if N > 0 else 0.0
 
-    out = {"em": em, "f1": f1}
+    out = {"em": em, "f1": f1, "n_evaluated": N}
 
     # Optional EM@Admin
     if admin_prediction_file:
         with open(admin_prediction_file, "r", encoding="utf-8") as f:
             admin_obj = json.load(f)
         admin_correct = _compute_admin_correct_ids(admin_obj, gold_answers)
+        # Restrict admin-correct set to questions this prediction also answered
+        admin_correct &= set(eval_qids)
         em_admin = _compute_af_em(user_ans, gold_answers, admin_correct)
         out["em_admin"] = em_admin
 

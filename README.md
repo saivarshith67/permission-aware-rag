@@ -7,18 +7,21 @@ This repository contains the official implementation for the paper:
 
 ## Architecture
 
-The framework is designed to perform retrieval from a centralized vector store while delegating access control to the native IAM systems of each data provider (e.g., GCP, AWS, Keycloak). This preserves the policy autonomy of each source and avoids the risks of manual policy merging.  
+This local setup performs retrieval from a centralized FAISS vector store and delegates
+**real-time access control to Keycloak Authorization Services**. Documents are stored on
+disk under `artifacts/resources/KEYCLOAK/` — no GCP or AWS is required.
 
-The overall architecture is detailed in our paper (Figure 3).  
+RBAC is enforced via Keycloak client roles mapped to document collections; ABAC attribute
+matches are encoded as additional role grants at provisioning time.
 
 ---
 
 ## Key Features
 
-- **Fine-Grained Access Control**: Enforces document-level permissions for RAG pipelines.  
-- **Native IAM Integration**: Delegates permission checks to provider-native IAM systems like GCP IAM, AWS IAM, and Keycloak in real-time.  
-- **Heterogeneous Environments**: Supports multiple cloud providers and policy models (RBAC and ABAC) simultaneously.  
-- **No Policy Merging**: Avoids the complexity and security risks associated with merging diverse access policies.  
+- **Fine-Grained Access Control**: Enforces document-level permissions for RAG pipelines.
+- **Keycloak IAM**: Real-time permission checks via Keycloak Authorization Services.
+- **Local-first**: Documents stay on disk; only Keycloak (Docker) is needed for IAM.
+- **RBAC + ABAC**: Collections with roles and attribute-based grants.
 
 ---
 
@@ -38,20 +41,34 @@ Specifically, we rely on the *distractor* split (`hotpot_dev_distractor_v1.json`
 
 ### Download
 
-You can download the dataset using:
+The original S3 bucket is no longer available. Download the distractor dev set from Hugging Face:
 
+**Linux / macOS:**
 ```bash
-curl -Lo artifacts/hotpot_dev_distractor_v1.json https://hotpotqa.s3.amazonaws.com/hotpot_dev_distractor_v1.json
+curl -L -o artifacts/hotpot_dev_distractor_v1.json \
+  https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/main/hotpot_dev_distractor_v1.json
 ```
-The dataset file should be placed in the artifacts/ directory.
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest `
+  -Uri "https://huggingface.co/datasets/namlh2004/hotpotqa/resolve/main/hotpot_dev_distractor_v1.json" `
+  -OutFile "artifacts/hotpot_dev_distractor_v1.json"
+```
+
+The dataset file should be placed in the `artifacts/` directory (~61 MB).
 
 ## Setup & Installation
 
 ### 1. Prerequisites
 
-- Python 3.10+ and Conda  
-- A Google Cloud Platform (GCP) project with billing enabled  
-- An Amazon Web Services (AWS) account  
+- Python 3.10+ and [uv](https://docs.astral.sh/uv/)
+- [Docker](https://www.docker.com/) (for local Keycloak IAM)
+- OpenAI API key (for evaluation scripts 08–09)
+
+This fork runs **locally with Keycloak only** — no GCP or AWS account is required. Documents stay on disk under `artifacts/resources/`; permission checks go through Keycloak Authorization Services.
+
+Legacy scripts for GCP/AWS (`02_gcp_aws_resource_creator.py`, `04_upload_resources.py`) remain in `/scripts` for the original paper setup but are not used in the local workflow below.
 
 ### 2. Clone Repository
 
@@ -60,117 +77,110 @@ git clone https://github.com/your-username/permission-aware-rag.git
 cd permission-aware-rag
 ```
 
-### 3. Set Up Environment and Dependencies
-
-We recommend using Conda for environment management.
+### 3. Set Up Python Environment
 
 ```bash
-conda create -n permission-aware-rag python=3.10.18
-conda activate permission-aware-rag
-
-# Install dependencies
-pip install -r requirements.txt
+uv sync
 ```
 
-**requirements.txt**
-```txt
-python-dotenv
-google-api-python-client
-oauth2client
-boto3
-tqdm
-google-cloud-storage
-numpy
-faiss-cpu
-sentence-transformers
-langchain
-langchain-openai
-ujson
+### 4. Start Keycloak
+
+```bash
+docker compose up -d
 ```
 
-### 4. Cloud Provider Setup
+Keycloak admin console: http://localhost:8081 (login: `admin` / `admin`).
 
-- **GCP**  
-  1. Create a service account with **Owner** and **Storage Admin** roles.  
-  2. Enable the **Identity and Access Management (IAM) API**.  
-  3. Download the service account JSON key file.  
-
-- **AWS**  
-  1. Create an IAM user with `AmazonS3FullAccess` and `IAMFullAccess`.  
-  2. Generate an access key and secret key.  
+> If port 8080 is already in use on your machine, this compose file maps host **8081** → container 8080.
 
 ### 5. Configure Environment Variables
 
-Create a `.env` file in the project root with the following content:
+Copy the example and edit as needed:
 
-```env
-# OpenAI
-OPENAI_API_KEY="sk-..."
-
-# GCP
-GCP_PROJECT_ID="your-gcp-project-id"
-GCP_ADMIN_KEY_PATH="./artifacts/your-gcp-service-account-key.json"
-GCP_BUCKET_LOCATION="asia-northeast3"
-
-# AWS
-AWS_REGION="YOUR_REGION" # ex.ap-northeast-2
-AWS_ADMIN_ACCESS_KEY="YOUR_AWS_ACCESS_KEY"
-AWS_ADMIN_SECRET_KEY="YOUR_AWS_SECRET_KEY"
+```bash
+cp .env.example .env
 ```
 
+```env
+# LLM provider: openai | openrouter | gemini
+LLM_PROVIDER="openrouter"
+
+# OpenAI (when LLM_PROVIDER=openai)
+OPENAI_API_KEY="sk-..."
+OPENAI_MODEL="gpt-4o-mini"
+
+# OpenRouter (when LLM_PROVIDER=openrouter)
+OPENROUTER_API_KEY="sk-or-..."
+OPENROUTER_MODEL="openai/gpt-4o-mini"
+
+# Gemini (when LLM_PROVIDER=gemini)
+GOOGLE_API_KEY="..."   # or GEMINI_API_KEY
+GEMINI_MODEL="gemini-3.6-flash"
+
+KEYCLOAK_URL="http://localhost:8081"
+KEYCLOAK_ADMIN="admin"
+KEYCLOAK_ADMIN_PASSWORD="admin"
+KEYCLOAK_REALM="permission-aware-rag"
+KEYCLOAK_CLIENT_ID="permission-aware-rag-client"
+KEYCLOAK_USER_PASSWORD="password"
+```
+
+Switch models with `LLM_PROVIDER`. Defaults: OpenAI `gpt-4o-mini`, OpenRouter `openai/gpt-4o-mini`, Gemini `gemini-3.6-flash`.
 ---
 
 ## Running the Pipeline
 
-The scripts in `/scripts` should be run **in order from 01 to 09**.
+Run scripts **in order**. Set `PYTHONPATH` first:
 
 ```bash
-# Activate environment
-conda activate permission-aware-rag
-~permission-aware-rag$ export PYTHONPATH=$(pwd)
-# Run the pipeline
-python scripts/01_generate_access_model.py
-python scripts/02_gcp_aws_resource_creator.py
-python scripts/03_prepare_documents.py
-python scripts/04_upload_resources.py
-python scripts/05_generate_user_accessible_file_list.py
-python scripts/06_generate_question_list.py
-python scripts/07_run_ingestion_manager.py
-python scripts/08_run_quantitative_evaluation.py
-python scripts/09_run_latency_evaluation.py
+# Linux / macOS
+export PYTHONPATH=$(pwd)
+
+# Windows (PowerShell)
+$env:PYTHONPATH = (Get-Location).Path
 ```
+
+```bash
+uv run python scripts/01_generate_access_model.py
+uv run python scripts/03_prepare_documents.py
+uv run python scripts/02_keycloak_resource_creator.py
+uv run python scripts/04_verify_local_resources.py
+uv run python scripts/05_generate_user_accessible_file_list.py
+uv run python scripts/06_generate_question_list.py
+uv run python scripts/07_run_ingestion_manager.py
+uv run python scripts/08_run_quantitative_evaluation.py
+uv run python scripts/09_run_latency_evaluation.py
+```
+
+**Note:** Script 02 runs **after** 03 because it registers each document as a Keycloak authorization resource using `file_to_storage_info.json`. Registering all ~13,800 documents can take a long time; for a quicker trial set `KEYCLOAK_RESOURCE_LIMIT=500` in `.env`.
 
 ### Script Descriptions
 
-- **01_generate_access_model.py**  
-  Defines IAM rules, users, and resources in a JSON access model.  
+| Script | Purpose |
+|--------|---------|
+| **01_generate_access_model.py** | Defines Keycloak collections, RBAC roles, ABAC attributes, and users |
+| **03_prepare_documents.py** | Builds local document files under `artifacts/resources/KEYCLOAK/` |
+| **02_keycloak_resource_creator.py** | Creates Keycloak realm, client, users, resources, and policies |
+| **04_verify_local_resources.py** | Verifies local files exist (no cloud upload) |
+| **05_generate_user_accessible_file_list.py** | Ground-truth user → document access mapping |
+| **06_generate_question_list.py** | Extracts evaluation questions from HotpotQA |
+| **07_run_ingestion_manager.py** | Embeds documents and builds the FAISS index |
+| **08_run_quantitative_evaluation.py** | Quantitative EM/F1 evaluation (needs OpenAI) |
+| **09_run_latency_evaluation.py** | IAM permission-check latency benchmark |
 
-- **02_gcp_aws_resource_creator.py**  
-  Provisions buckets and IAM users on GCP and AWS.  
+### Pipeline flow
 
-- **03_prepare_documents.py**  
-  Processes HotpotQA dataset into document files.  
+```mermaid
+flowchart LR
+    A[01 Access model] --> B[03 Local documents]
+    B --> C[02 Keycloak setup]
+    C --> D[04 Verify files]
+    D --> E[05 Access mapping]
+    E --> F[06 Questions]
+    F --> G[07 FAISS ingest]
+    G --> H[08 / 09 Evaluate]
+```
 
-- **04_upload_resources.py**  
-  Uploads documents into cloud storage.  
-
-- **05_generate_user_accessible_file_list.py**  
-  Generates ground-truth user-to-document access mapping.  
-
-- **06_generate_question_list.py**  
-  Extracts multi-hop questions from HotpotQA for evaluation.  
-
-- **07_run_ingestion_manager.py**  
-  Embeds documents, builds FAISS index, and stores metadata.  
-
-- **08_run_quantitative_evaluation.py**  
-  Runs the **large-scale quantitative evaluation** over HotpotQA, measuring EM/F1 and their relationship to permission coverage.  
-  This script can also be adapted for **qualitative scenario-based evaluation** by modifying the IAM settings and evaluation cases.
-
-- **09_run_latency_evaluation.py**  
-  Evaluates latency overhead of real-time IAM permission checks.  
-
----
 
 ## License
 

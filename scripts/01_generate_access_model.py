@@ -1,27 +1,24 @@
 # 01_generate_access_model.py
+# Paper-aligned access model: 5 GCP RBAC buckets + 5 AWS ABAC buckets (10 total).
+# Keycloak is used as the local IAM surrogate for both providers.
 
 import json
 import random
 import string
 from pathlib import Path
 
-# ---------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------
-
 OUTPUT_DIR = Path("artifacts")
 OUTPUT_FILE = OUTPUT_DIR / "generated_access_model.json"
 
-# Random project prefix (lowercase letters, length 8)
 PROJECT_PREFIX = "".join(random.choices(string.ascii_lowercase, k=8))
 
-# GCP role mapping
+# GCP role mapping (RBAC) — 5 buckets
 GCP_RBAC = {
-    f"role_read_gcp_bucket_{i+1}": f"{PROJECT_PREFIX}-gcp-bucket-{i+1}"
+    f"role_read_gcp_bucket_{i + 1}": f"{PROJECT_PREFIX}-gcp-bucket-{i + 1}"
     for i in range(5)
 }
 
-# AWS bucket attribute-based conditions
+# AWS bucket attribute-based conditions (ABAC) — 5 buckets
 AWS_ABAC = {
     f"{PROJECT_PREFIX}-aws-bucket-1": {"attribute_a": "a1"},
     f"{PROJECT_PREFIX}-aws-bucket-2": {"attribute_a": "a1", "attribute_b": "b1"},
@@ -30,7 +27,13 @@ AWS_ABAC = {
     f"{PROJECT_PREFIX}-aws-bucket-5": {"attribute_b": "b2"},
 }
 
-# Users (expected ascending access ratio in the order listed)
+# Keycloak surrogate roles for AWS buckets (ABAC encoded as role grants at provision time)
+AWS_BUCKET_ROLES = {
+    bucket: f"role_read_aws_bucket_{i + 1}"
+    for i, bucket in enumerate(AWS_ABAC.keys())
+}
+
+# Users (expected ascending access ratio in the order listed) — matches paper Table 5
 USERS = [
     {"name": "user-1", "gcp_roles": None, "aws_attributes": None},
     {"name": "user-2", "gcp_roles": ["role_read_gcp_bucket_2"], "aws_attributes": None},
@@ -82,25 +85,22 @@ USERS = [
     {"name": "baseline-admin", "full_access": True},
 ]
 
-# Group configuration
 USER_GROUPS = {
     "abac-test-group": [u["name"] for u in USERS if u.get("aws_attributes")]
 }
 
-# Final model structure
 access_model = {
     "GCP_RBAC": GCP_RBAC,
     "AWS_ABAC": AWS_ABAC,
+    "AWS_BUCKET_ROLES": AWS_BUCKET_ROLES,
     "USERS": USERS,
     "USER_GROUPS": USER_GROUPS,
 }
 
 if __name__ == "__main__":
-    # Ensure artifacts dir exists
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Write file
     with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
         json.dump(access_model, f, indent=2)
-
     print(f"[INFO] Access model saved to {OUTPUT_FILE}")
+    print(f"[INFO] Buckets: {len(GCP_RBAC)} GCP (RBAC) + {len(AWS_ABAC)} AWS (ABAC) = "
+          f"{len(GCP_RBAC) + len(AWS_ABAC)} total")

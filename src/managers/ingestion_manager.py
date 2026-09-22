@@ -21,8 +21,7 @@ class IngestionConfig:
     faiss_meta_name: str = "faiss_metadata.json"
     metadata_name: str = "metadata.json"
     embedding_model: str = "all-MiniLM-L6-v2"
-    gcp_endpoint: str = "https://storage.googleapis.com"
-    aws_endpoint: str = "https://s3.ap-northeast-2.amazonaws.com"
+    keycloak_config_path: str = "keycloak_config.json"
     deterministic_uuid: bool = True
 
 class IngestionManager:
@@ -78,24 +77,29 @@ class IngestionManager:
                         if ctx_title == title:
                             doc_map[title] = " ".join(sents)
                             break
-        
+
         print(f"Total unique docs to ingest: {len(doc_map)}")
-        
+
+        keycloak_cfg = self._load_keycloak_config()
+
         records: List[Tuple[str, str, Dict[str, Any]]] = []
         for title, content in tqdm(doc_map.items(), desc="Processing documents"):
             file_name = sanitize_filename(title) + ".txt"
-            
+
             storage_info = storage_map.get(file_name, {})
             provider = storage_info.get("provider", "")
             bucket = storage_info.get("bucket", "")
-            
+
             if self.cfg.deterministic_uuid:
                 key = f"{provider}:{bucket}:{file_name}"
                 global_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, key))
             else:
                 global_uuid = str(uuid.uuid4())
 
-            endpoint = self.cfg.gcp_endpoint if provider == "gcp" else self.cfg.aws_endpoint
+            # Local Keycloak surrogates GCP/AWS IAM; attach authz endpoint metadata.
+            endpoint = keycloak_cfg.get("endpoint", "http://localhost:8081")
+            realm = keycloak_cfg.get("realm", "")
+            client_uuid = keycloak_cfg.get("client_uuid", "")
 
             meta = {
                 "file_name": file_name,
@@ -106,6 +110,8 @@ class IngestionManager:
                     "iam": storage_info.get("iam", ""),
                     "region": storage_info.get("region", ""),
                     "bucket": bucket,
+                    "realm": realm,
+                    "client_uuid": client_uuid,
                 },
             }
             records.append((file_name, content, meta))
@@ -113,3 +119,11 @@ class IngestionManager:
         if not records:
             raise RuntimeError("No records were collected. Check the HotpotQA data and storage map.")
         return records
+
+    def _load_keycloak_config(self) -> Dict[str, Any]:
+        path = os.path.join(self.cfg.output_dir, self.cfg.keycloak_config_path)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        print(f"[WARN] Keycloak config not found at {path}. Run 02_keycloak_resource_creator.py first.")
+        return {}

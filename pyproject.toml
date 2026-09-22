@@ -1,0 +1,27 @@
+[project]
+name = "permission-aware-rag"
+version = "0.1.0"
+description = "IAM-based access filtering for retrieval-augmented generation (Keycloak)"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "faiss-cpu>=1.15.0",
+    "langchain>=1.3.15",
+    "langchain-google-genai>=4.4.0",
+    "langchain-openai>=1.5.1",
+    "numpy>=2.2.6",
+    "python-dotenv>=1.2.3",
+    "requests>=2.34.2",
+    "sentence-transformers>=5.7.0",
+    "tqdm>=4.70.0",
+    "ujson>=5.13.0",
+]
+
+[project.optional-dependencies]
+# Only needed for the legacy GCP/AWS paper scripts
+cloud = [
+    "boto3>=1.43.73",
+    "google-api-python-client>=2.198.0",
+    "google-cloud-storage>=3.13.1",
+    "oauth2client>=4.1.3",
+]

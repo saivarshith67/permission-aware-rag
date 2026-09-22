@@ -1,22 +1,28 @@
 from typing import Dict, Type, Optional
 from .base import AccessControlBase
-from .gcp import GCPAccessControl
-from .aws import AWSAccessControl
 from .keycloak import KeycloakAccessControl
 
+
 class AdapterFactory:
+    """IAM adapter factory.
+
+    Local setup uses Keycloak Authorization Services as a surrogate for the
+    paper's GCP (RBAC) and AWS (ABAC) providers. Provider labels from the
+    storage map are preserved so metadata stays paper-compatible.
+    """
+
     def __init__(self, credentials: Dict):
         self.credentials = credentials or {}
         self._registry: Dict[str, Type[AccessControlBase]] = {
-            "gcp": GCPAccessControl,
-            "aws": AWSAccessControl,
             "keycloak": KeycloakAccessControl,
             "on-premise": KeycloakAccessControl,
+            # Surrogate mappings for local Keycloak-backed paper buckets
+            "gcp": KeycloakAccessControl,
+            "aws": KeycloakAccessControl,
         }
         self._cache: Dict[str, AccessControlBase] = {}
 
     def normalize(self, provider: Optional[str]) -> str:
-        # only strip/lower; no alias expansion
         return (provider or "").strip().lower()
 
     def get(self, provider: Optional[str]) -> Optional[AccessControlBase]:

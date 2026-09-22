@@ -68,7 +68,7 @@ def main():
             print(f"[INFO] run_for_latency elapsed: {t1 - t0:.2f}s")
 
             iam_latencies = []
-            aws_durs, gcp_durs = [], []
+            keycloak_durs = []
             num_q = len(result["questions"]) or 1
 
             for q in result["questions"]:
@@ -76,24 +76,23 @@ def main():
                 uuid_to_provider = {d["uuid"]: (d.get("metadata") or {}).get("provider") for d in q["doc_results"]}
                 for uuid, dur in q["uuid_access_check_durations"].items():
                     prov = uuid_to_provider.get(uuid)
-                    if prov == "aws":
-                        aws_durs.append(dur)
-                    elif prov == "gcp":
-                        gcp_durs.append(dur)
+                    if prov in ("keycloak", "on-premise"):
+                        keycloak_durs.append(dur)
+                    elif prov in ("gcp", "aws"):
+                        # Local Keycloak surrogates for paper GCP/AWS buckets
+                        keycloak_durs.append(dur)
 
             avg_iam_ms = (sum(iam_latencies) / num_q) * 1000
             avg_e2e_ms = ((t1 - t0) / num_q) * 1000
-            avg_aws_ms = (sum(aws_durs) / len(aws_durs)) * 1000 if aws_durs else 0.0
-            avg_gcp_ms = (sum(gcp_durs) / len(gcp_durs)) * 1000 if gcp_durs else 0.0
+            avg_keycloak_ms = (sum(keycloak_durs) / len(keycloak_durs)) * 1000 if keycloak_durs else 0.0
 
-            print(f"- IAM: {avg_iam_ms:.2f} ms | E2E: {avg_e2e_ms:.2f} ms | AWS: {avg_aws_ms:.2f} ms | GCP: {avg_gcp_ms:.2f} ms")
+            print(f"- IAM: {avg_iam_ms:.2f} ms | E2E: {avg_e2e_ms:.2f} ms | Keycloak: {avg_keycloak_ms:.2f} ms")
 
             summary_rows.append({
                 "top_k": top_k, "max_workers": max_workers, "user": user_name,
                 "iam_latency_ms": round(avg_iam_ms, 2),
                 "e2e_latency_ms": round(avg_e2e_ms, 2),
-                "avg_aws_response_ms": round(avg_aws_ms, 2),
-                "avg_gcp_response_ms": round(avg_gcp_ms, 2),
+                "avg_keycloak_response_ms": round(avg_keycloak_ms, 2),
             })
 
     with open(os.path.join(RESULTS_DIR, "latency_summary.json"), "w", encoding="utf-8") as f:
